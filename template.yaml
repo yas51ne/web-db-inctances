@@ -1,0 +1,350 @@
+heat_template_version: 2015-04-30
+
+description:  template to deploy an httpd php 5.6 web server instance and mysql 5.6 database instance for toudeal app.
+
+parameters:
+  public_net:
+    type: string
+    default: external_network
+    description: >
+      ID or name of public network for which floating IP addresses will be allocated
+  dns_servers:
+    type: comma_delimited_list
+    default: 8.8.8.8
+    description: Comma separated list of DNS nameservers for the private network.
+  router_name:
+    type: string
+    default: toudeal_router
+    description: Name of the router
+  dns_domain_name:
+    type: string
+    default: toudeal.production
+    description: Name of the DNS Domain
+  private_net_name:
+    type: string
+    default: toudeal-network
+    description: Name of private network to be created
+  private_subnet_name:
+    type: string
+    default: toudeal-subnet
+    description: Name of private subnet to be created
+  private_net_cidr:
+    type: string
+    default: 172.16.10.0/24
+    description: Private network address (CIDR notation)
+  private_net_gateway:
+    type: string
+    default: 172.16.10.1
+    description: Private network gateway address
+  private_net_pool_start:
+    type: string
+    default: 172.16.10.100
+    description: Start of private network IP address allocation pool
+  private_net_pool_end:
+    type: string
+    default: 172.16.10.200
+    description: End of private network IP address allocation pool
+  key_name:
+    type: string
+    label: Key Name
+    default: rootATcompute01
+    description: Name of key-pair to be used for compute instance
+  image_name:
+    type: string
+    label: Image ID
+    default: CentOS_7
+    description: Image to be used for compute instance
+  web_server_flavor_name:
+    type: string
+    default: m1.small
+    description: Type of instance (flavor) to be used
+  web_server_name:
+    type: string
+    default: web-server
+    description: Name of the Instance.
+  db_flavor_name:
+    type: string
+    default: m1.small
+    description: Type of instance (flavor) to be used
+  db_instance_name:
+    type: string
+    default: database
+    description: Name of the Instance.
+  db_volume_size:
+    type: number
+    default: 20
+    description: Size of the Volume.
+  db_volume_name:
+    type: string
+    default: toudeal_database_disk
+    description: Name of the Volume.
+  web_secgroup:
+    type: string
+    default: toudeal-web-secgroup
+    description: Name of the web Security Group.
+  db_secgroup:
+    type: string
+    default: toudeal-db-secgroup
+    description: Name of the db Security Group.
+  db_private_ip:
+    type: string
+    default: 172.16.10.101
+    description: Fixed IP Address for database.
+  web_private_ip:
+    type: string
+    default: 172.16.10.102
+    description: Fixed IP Address for web server.
+  db_name:
+    type: string
+    description:  database name
+    default: toudeal
+    constraints:
+      - length: { min: 1, max: 64 }
+        description: db_name must be between 1 and 64 characters
+      - allowed_pattern: '[a-zA-Z][a-zA-Z0-9]*'
+        description: >
+          db_name must begin with a letter and contain only alphanumeric
+          characters
+  db_username:
+    type: string
+    description: The yassine database admin account username
+    default: admin
+    hidden: true
+    constraints:
+      - length: { min: 1, max: 16 }
+        description: db_username must be between 1 and 64 characters
+      - allowed_pattern: '[a-zA-Z][a-zA-Z0-9]*'
+        description: >
+          db_username must begin with a letter and contain only alphanumeric
+          characters
+  db_password:
+    type: string
+    description: The yassine database admin account password
+    default: admin
+    hidden: true
+    constraints:
+      - length: { min: 1, max: 41 }
+        description: db_username must be between 1 and 64 characters
+      - allowed_pattern: '[a-zA-Z0-9]*'
+        description: db_password must contain only alphanumeric characters
+  db_root_password:
+    type: string
+    description: Root password for MySQL
+    default: admin
+    hidden: true
+    constraints:
+      - length: { min: 1, max: 41 }
+        description: db_username must be between 1 and 64 characters
+      - allowed_pattern: '[a-zA-Z0-9]*'
+    description: db_password must contain only alphanumeric characters
+
+resources:
+
+  private_network:
+    type: OS::Neutron::Net
+    properties:
+      name: { get_param: private_net_name }
+
+  private_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: { get_param: private_subnet_name }
+      network_id: { get_resource: private_network }
+      cidr: { get_param: private_net_cidr }
+      gateway_ip: { get_param: private_net_gateway }
+      dns_nameservers: { get_param: dns_servers }
+      allocation_pools:
+        - start: { get_param: private_net_pool_start }
+          end: { get_param: private_net_pool_end }
+
+  router:
+    type: OS::Neutron::Router
+    properties:
+      name: { get_param: router_name }
+      external_gateway_info:
+        network: { get_param: public_net }
+        enable_snat: true
+
+  router_interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: router }
+      subnet_id: { get_resource: private_subnet }
+
+  toudeal_web_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name:  { get_param: web_secgroup }
+      description: SSH HTTP HTTPS
+      rules:
+        - protocol: tcp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: tcp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 80
+          port_range_max: 80
+        - protocol: tcp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 443
+          port_range_max: 443
+ 
+  toudeal_db_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name:  { get_param: db_secgroup }
+      description: SSH MYSQL
+      rules:
+        - protocol: tcp
+          remote_ip_prefix: 172.16.10.101
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: tcp
+          remote_ip_prefix: 172.16.10.101
+          port_range_min: 3306
+          port_range_max: 3306
+        - protocol: tcp
+
+  db_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_resource: private_network }
+      fixed_ips:
+        - ip_address: { get_param: db_private_ip }
+      security_groups:
+      - { get_resource: toudeal_db_secgroup }
+
+  web_server_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_resource: private_network }
+      fixed_ips:
+        - ip_address: { get_param: web_private_ip }
+      security_groups:
+      - { get_resource: toudeal_web_secgroup }
+
+  web_server_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: { get_param: public_net }
+
+  web_server_floating_asso:
+    type: OS::Neutron::FloatingIPAssociation
+    depends_on: web_server_instance
+    properties:
+      floatingip_id: { get_resource: web_server_floating_ip }
+      port_id: { get_resource: web_server_port }
+
+  web_server_instance:
+    type: OS::Nova::Server
+    properties:
+      name: { get_param: web_server_name }
+      key_name: { get_param: key_name }
+      image: { get_param: image_name }
+      flavor: { get_param: web_server_flavor_name }
+      networks:
+      - port: { get_resource: web_server_port }
+      user_data:
+        str_replace:
+          template: |
+            #!/bin/bash -v
+
+            sudo rpm -Uvh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+            sudo rpm -Uvh https://mirror.webtatic.com/yum/el7/webtatic-release.rpm
+            sudo yum -y install mysql httpd wget php56w-fpm php56w-opcache php56w-mysql
+
+            sudo systemctl enable httpd.service
+            sudo systemctl start httpd.service
+
+            sudo firewall-cmd --permanent --zone=public --add-service=http 
+            sudo firewall-cmd --permanent --zone=public --add-service=https
+            sudo firewall-cmd --reload
+
+            sudo echo "$ws_ip $ws_name $ws_name.$dns" >> /etc/hosts
+            sudo echo "$db_ip $db_instance_name $db_instance_name.$dns" >> /etc/hosts
+            sudo sed -i -e 's/enforcing/disabled/g' /etc/selinux/config
+            sudo reboot
+          params:
+            $ws_ip: { get_param: web_private_ip }
+            $db_ip: { get_param: db_private_ip }
+            $ws_name: { get_param: web_server_name }
+            $db_instance_name: { get_param: db_instance_name }
+            $dns: { get_param: dns_domain_name }
+
+  database_instance:
+    type: OS::Nova::Server
+    properties:
+      name: { get_param: db_instance_name }
+      key_name: { get_param: key_name }
+      image: { get_param: image_name }
+      flavor: { get_param: web_server_flavor_name }
+      networks:
+      - port: { get_resource: db_port }
+      user_data:
+        str_replace:
+          template: |
+            #!/bin/bash -v
+
+            sudo yum install http://dev.mysql.com/get/mysql-community-release-el7-5.noarch.rpm -y
+            sudo yum install mysql-community-server -y
+            sudo systemctl enable mysqld.service
+            sudo systemctl start mysqld.service
+
+            sudo firewall-cmd --permanent --zone=trusted --add-source=$ws_ip
+            sudo firewall-cmd --permanent --zone=trusted --add-port=3306/tcp
+            sudo firewall-cmd  --reload
+
+            sudo echo "$ws_ip $ws_name $ws_name.$dns" >> /etc/hosts
+            sudo echo "$db_ip $db_instance_name $db_instance_name.$dns" >> /etc/hosts
+
+            sudo sed -i -e 's/# log_bin/bind-address=$db_ip/g' /etc/my.cnf
+            # Setup MySQL root password and create a user
+            sudo mysqladmin -u root password db_rootpassword
+            sudo cat << EOF | mysql -u root --password=db_rootpassword
+            CREATE DATABASE db_name;
+            GRANT ALL PRIVILEGES ON db_name.* TO "db_user"@"$ws_name"
+            IDENTIFIED BY "db_password";
+            FLUSH PRIVILEGES;
+            EXIT
+            EOF
+
+          params:
+            $ws_ip: { get_param: web_private_ip }
+            $db_ip: { get_param: db_private_ip }
+            $ws_name: { get_param: web_server_name }
+            $db_instance_name: { get_param: db_instance_name }
+            $dns: { get_param: dns_domain_name }
+            db_rootpassword: { get_param: db_root_password }
+            db_name: { get_param: db_name }
+            db_user: { get_param: db_username }
+            db_password: { get_param: db_password }
+
+outputs:
+  web-server_name:
+    description: The hostname of the web server instance
+    value:
+    - { get_attr: [ web_server_instance, name ] }
+  web-server_private_IP:
+    description: The private IP address of the web server instance
+    value:
+    - { get_attr: [ web_server_instance, first_address ] }
+  database_name:
+    description: The hostname of the database instance
+    value:
+    - { get_attr: [ database_instance, name ] }
+  database_private_IP:
+    description: The private IP address of the database instance
+    value:
+    - { get_attr: [ database_instance, first_address ] }
+  web-server_public_IP:
+    description: The public IP address of the web server instance
+    value:
+    - { get_attr: [ web_server_floating_ip, floating_ip_address ] }
+  web_site_addresse:
+    description: This is the url of the web site.
+    value:
+      str_replace:
+        params:
+          site_ip: { get_attr: [ web_server_floating_ip, floating_ip_address ] }
+        template: http://site_ip
