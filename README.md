@@ -12,3 +12,4 @@ Heat orchestration templates (HOT) for provisionning :
 - Instances :               OS::Nova::Server
 
 to turn an secure httpd php 5.6 web server instance with an mysql 5.6 dabase server on another instance.
+
